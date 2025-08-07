@@ -1042,10 +1042,6 @@ function webrtcIf(
     if ( typeof good !== 'string' ) { return; }
     const safe = safeSelf();
     const reGood = safe.patternToRegex(good);
-    const rtcName = window.RTCPeerConnection
-        ? 'RTCPeerConnection'
-        : (window.webkitRTCPeerConnection ? 'webkitRTCPeerConnection' : '');
-    if ( rtcName === '' ) { return; }
     const log = console.log.bind(console);
     const neuteredPeerConnections = new WeakSet();
     const isGoodConfig = function(instance, config) {
@@ -1071,28 +1067,31 @@ function webrtcIf(
         neuteredPeerConnections.add(instance);
         return false;
     };
-    const peerConnectionCtor = window[rtcName];
-    const peerConnectionProto = peerConnectionCtor.prototype;
-    peerConnectionProto.createDataChannel =
-        new Proxy(peerConnectionProto.createDataChannel, {
-            apply: function(target, thisArg, args) {
-                if ( isGoodConfig(target, args[1]) === false ) {
-                    log('uBO:', args[1]);
-                    return Reflect.apply(target, thisArg, args.slice(0, 1));
+    for ( const rtcName of [ 'RTCPeerConnection', 'webkitRTCPeerConnection' ] ) {
+        const peerConnectionCtor = window[rtcName];
+        if ( !peerConnectionCtor ) { continue; }
+        const peerConnectionProto = peerConnectionCtor.prototype;
+        peerConnectionProto.createDataChannel =
+            new Proxy(peerConnectionProto.createDataChannel, {
+                apply: function(target, thisArg, args) {
+                    if ( isGoodConfig(target, args[1]) === false ) {
+                        log('uBO:', args[1]);
+                        return Reflect.apply(target, thisArg, args.slice(0, 1));
+                    }
+                    return Reflect.apply(target, thisArg, args);
+                },
+            });
+        window[rtcName] =
+            new Proxy(peerConnectionCtor, {
+                construct: function(target, args) {
+                    if ( isGoodConfig(target, args[0]) === false ) {
+                        log('uBO:', args[0]);
+                        return Reflect.construct(target);
+                    }
+                    return Reflect.construct(target, args);
                 }
-                return Reflect.apply(target, thisArg, args);
-            },
-        });
-    window[rtcName] =
-        new Proxy(peerConnectionCtor, {
-            construct: function(target, args) {
-                if ( isGoodConfig(target, args[0]) === false ) {
-                    log('uBO:', args[0]);
-                    return Reflect.construct(target);
-                }
-                return Reflect.construct(target, args);
-            }
-        });
+            });
+    }
 }
 
 /******************************************************************************/
@@ -1383,10 +1382,6 @@ builtinScriptlets.push({
 });
 // Prevent web pages from using RTCPeerConnection(), and report attempts in console.
 function noWebrtc() {
-    var rtcName = window.RTCPeerConnection ? 'RTCPeerConnection' : (
-        window.webkitRTCPeerConnection ? 'webkitRTCPeerConnection' : ''
-    );
-    if ( rtcName === '' ) { return; }
     var log = console.log.bind(console);
     var pc = function(cfg) {
         log('Document tried to create an RTCPeerConnection: %o', cfg);
@@ -1402,15 +1397,18 @@ function noWebrtc() {
             return '[object RTCPeerConnection]';
         }
     };
-    var z = window[rtcName];
-    window[rtcName] = pc.bind(window);
-    if ( z.prototype ) {
-        z.prototype.createDataChannel = function() {
-            return {
-                close: function() {},
-                send: function() {}
-            };
-        }.bind(null);
+    for ( const rtcName of [ 'RTCPeerConnection', 'webkitRTCPeerConnection' ] ) {
+        var z = window[rtcName];
+        if ( !z ) { continue; }
+        window[rtcName] = pc.bind(window);
+        if ( z.prototype ) {
+            z.prototype.createDataChannel = function() {
+                return {
+                    close: function() {},
+                    send: function() {}
+                };
+            }.bind(null);
+        }
     }
 }
 
